@@ -11,6 +11,7 @@ import {
 import { BindingLabel } from "./BindingLabel";
 import { describeBinding } from "./binding-label-parts";
 import { behaviorIcon, categoryAbbreviation } from "./key-symbols";
+import { ModifierPlatform, detectPlatform } from "./platform";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -21,6 +22,8 @@ export interface KeymapProps {
   scale: LayoutZoom;
   selectedLayerIndex: number;
   selectedKeyPosition: number | undefined;
+  /** OS conventions for modifier labels; defaults to the detected OS. */
+  platform?: ModifierPlatform;
   onKeyPositionClicked: (keyPosition: number) => void;
 }
 
@@ -31,6 +34,7 @@ export const Keymap = ({
   scale,
   selectedLayerIndex,
   selectedKeyPosition,
+  platform = detectPlatform(),
   onKeyPositionClicked,
 }: KeymapProps) => {
   if (!keymap.layers[selectedLayerIndex]) {
@@ -55,7 +59,7 @@ export const Keymap = ({
     const binding = keymap.layers[selectedLayerIndex].bindings[i];
     const behavior = behaviors[binding.behaviorId];
     const displayName = behavior?.displayName || "Unknown";
-    const display = describeBinding(binding, behavior, layers);
+    const display = describeBinding(binding, behavior, layers, platform);
 
     return {
       id: `${keymap.layers[selectedLayerIndex].id}-${i}`,

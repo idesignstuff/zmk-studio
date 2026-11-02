@@ -28,6 +28,7 @@ import {
   hid_usage_get_labels,
   hid_usage_page_and_id_from_usage,
 } from "../hid-usages";
+import { ModifierPlatform, detectPlatform } from "./platform";
 
 const KEYBOARD_PAGE = 0x07;
 const CONSUMER_PAGE = 0x0c;
@@ -49,12 +50,52 @@ const MOD_RSFT = 0x20;
 const MOD_RALT = 0x40;
 const MOD_RGUI = 0x80;
 
-const MOD_SYMBOLS: [number, string][] = [
-  [MOD_LCTL | MOD_RCTL, "⌃"],
-  [MOD_LALT | MOD_RALT, "⌥"],
-  [MOD_LSFT | MOD_RSFT, "⇧"],
-  [MOD_LGUI | MOD_RGUI, "⌘"],
-];
+interface ModifierNames {
+  ctrl: string;
+  alt: string;
+  shift: string;
+  gui: string;
+  /** Separator between a modifier prefix and the key, e.g. "+" in Ctrl+C. */
+  join: string;
+}
+
+const MODIFIER_NAMES: Record<ModifierPlatform, ModifierNames> = {
+  mac: { ctrl: "⌃", alt: "⌥", shift: "⇧", gui: "⌘", join: "" },
+  win: { ctrl: "Ctrl", alt: "Alt", shift: "⇧", gui: "Win", join: "+" },
+  linux: { ctrl: "Ctrl", alt: "Alt", shift: "⇧", gui: "Super", join: "+" },
+};
+
+/** Modifier prefix for implicit modifiers, in each platform's usual order. */
+const modifierPrefix = (mods: number, platform: ModifierPlatform) => {
+  const n = MODIFIER_NAMES[platform];
+  const order: [number, string][] =
+    platform === "mac"
+      ? [
+          [MOD_LCTL | MOD_RCTL, n.ctrl],
+          [MOD_LALT | MOD_RALT, n.alt],
+          [MOD_LSFT | MOD_RSFT, n.shift],
+          [MOD_LGUI | MOD_RGUI, n.gui],
+        ]
+      : [
+          [MOD_LCTL | MOD_RCTL, n.ctrl],
+          [MOD_LGUI | MOD_RGUI, n.gui],
+          [MOD_LALT | MOD_RALT, n.alt],
+          [MOD_LSFT | MOD_RSFT, n.shift],
+        ];
+  const parts = order.filter(([bits]) => mods & bits).map(([, s]) => s);
+  return parts.length ? parts.join(n.join) + n.join : "";
+};
+
+/** Labels for the modifier keys themselves (Left Control ... Right GUI). */
+const modifierKeyLabel = (
+  id: number,
+  platform: ModifierPlatform
+): string | undefined => {
+  if (id < 0xe0 || id > 0xe7) return undefined;
+  const n = MODIFIER_NAMES[platform];
+  const name = [n.ctrl, n.shift, n.alt, n.gui][id & 0x03];
+  return id >= 0xe4 ? `R${name}` : name;
+};
 
 /** Keycap symbols for keyboard page usages, used in place of names. */
 const KEYBOARD_SYMBOLS: Record<number, string> = {
@@ -76,14 +117,6 @@ const KEYBOARD_SYMBOLS: Record<number, string> = {
   0x52: "↑",
   0x58: "↵", // Keypad Enter
   0x65: "☰", // Application / Menu
-  0xe0: "⌃",
-  0xe1: "⇧",
-  0xe2: "⌥",
-  0xe3: "⌘",
-  0xe4: "R⌃",
-  0xe5: "R⇧",
-  0xe6: "R⌥",
-  0xe7: "R⌘",
 };
 
 /** What a keyboard page usage produces with shift held (US layout). */
@@ -131,7 +164,10 @@ const removePrefix = (s?: string) => s?.replace(/^Keyboard /, "");
  * Compute what to draw on a key for a HID usage, preferring keycap symbols,
  * and folding implicit modifiers into the label (e.g. LS(N2) shows "@").
  */
-export const hidUsageDisplay = (usage: number): DisplayLabel => {
+export const hidUsageDisplay = (
+  usage: number,
+  platform: ModifierPlatform = detectPlatform()
+): DisplayLabel => {
   const mods = (usage >>> 24) & 0xff;
   const [rawPage, id] = hid_usage_page_and_id_from_usage(usage);
   const page = rawPage & 0xff;
@@ -144,7 +180,9 @@ export const hidUsageDisplay = (usage: number): DisplayLabel => {
   }
 
   let text =
-    (page === KEYBOARD_PAGE ? KEYBOARD_SYMBOLS[id] : undefined) ??
+    (page === KEYBOARD_PAGE
+      ? (modifierKeyLabel(id, platform) ?? KEYBOARD_SYMBOLS[id])
+      : undefined) ??
     removePrefix(labels.short) ??
     `0x${id.toString(16)}`;
   let remainingMods = mods;
@@ -155,9 +193,7 @@ export const hidUsageDisplay = (usage: number): DisplayLabel => {
     remainingMods = 0;
   }
 
-  const prefix = MOD_SYMBOLS.filter(([bits]) => remainingMods & bits)
-    .map(([, s]) => s)
-    .join("");
+  const prefix = modifierPrefix(remainingMods, platform);
 
   return {
     text: prefix + text,

@@ -176,6 +176,7 @@ const meta = {
     scale: 1,
     selectedLayerIndex: 0,
     selectedKeyPosition: undefined,
+    platform: "mac",
     onKeyPositionClicked: fn(),
   },
 } satisfies Meta<typeof Keymap>;
@@ -184,3 +185,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const MixedBehaviors: Story = {};
+
+export const WindowsModifiers: Story = { args: { platform: "win" } };
+
+export const LinuxModifiers: Story = { args: { platform: "linux" } };

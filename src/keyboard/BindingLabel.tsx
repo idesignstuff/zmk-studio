@@ -5,7 +5,8 @@ const primaryTextSize = (text: string) => {
   const length = [...text].length;
   if (length <= 2) return "text-lg";
   if (length <= 4) return "text-base";
-  return "text-sm";
+  if (length <= 6) return "text-sm";
+  return "text-xs";
 };
 
 const Label = ({

@@ -14,6 +14,7 @@ import {
   noParamSymbol,
   valueLabel,
 } from "./key-symbols";
+import type { ModifierPlatform } from "./platform";
 
 export interface LayerInfo {
   id: number;
@@ -58,7 +59,8 @@ const findMatchingSet = (
 const describeParam = (
   value: number,
   values: BehaviorParameterValueDescription[],
-  layers: LayerInfo[]
+  layers: LayerInfo[],
+  platform: ModifierPlatform
 ): ParamLabel | undefined => {
   if (values.length === 0 || values.every((v) => v.nil)) {
     return undefined;
@@ -80,7 +82,7 @@ const describeParam = (
 
   for (const v of values) {
     if (v.hidUsage) {
-      return { kind: "hid", label: hidUsageDisplay(value) };
+      return { kind: "hid", label: hidUsageDisplay(value, platform) };
     } else if (v.layerId) {
       const index = layers.findIndex((l) => l.id === value);
       const name =
@@ -103,7 +105,8 @@ const describeParam = (
 export const describeBinding = (
   binding: BehaviorBinding,
   behavior: GetBehaviorDetailsResponse | undefined,
-  layers: LayerInfo[]
+  layers: LayerInfo[],
+  platform: ModifierPlatform
 ): BindingDisplay => {
   if (!behavior) {
     return { showHeader: true };
@@ -116,12 +119,12 @@ export const describeBinding = (
   );
 
   const p1: ParamLabel | undefined = set
-    ? describeParam(binding.param1, set.param1, layers)
+    ? describeParam(binding.param1, set.param1, layers, platform)
     : binding.param1
       ? // Unknown metadata shape: treat param1 as a HID usage when set.
-        { kind: "hid", label: hidUsageDisplay(binding.param1) }
+        { kind: "hid", label: hidUsageDisplay(binding.param1, platform) }
       : undefined;
-  const p2 = set ? describeParam(binding.param2, set.param2, layers) : undefined;
+  const p2 = set ? describeParam(binding.param2, set.param2, layers, platform) : undefined;
 
   // No parameters (&trans, &none, &bootloader, macros, ...): show a symbol,
   // the behavior's icon, or its name as the main label.
