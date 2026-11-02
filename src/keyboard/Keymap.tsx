@@ -8,7 +8,10 @@ import {
   LayoutZoom,
   PhysicalLayout as PhysicalLayoutComp,
 } from "./PhysicalLayout";
-import { HidUsageLabel } from "./HidUsageLabel";
+import { BindingLabel } from "./BindingLabel";
+import { describeBinding } from "./binding-label-parts";
+import { behaviorIcon, categoryAbbreviation } from "./key-symbols";
+import { ModifierPlatform, detectPlatform } from "./platform";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -19,6 +22,8 @@ export interface KeymapProps {
   scale: LayoutZoom;
   selectedLayerIndex: number;
   selectedKeyPosition: number | undefined;
+  /** OS conventions for modifier labels; defaults to the detected OS. */
+  platform?: ModifierPlatform;
   onKeyPositionClicked: (keyPosition: number) => void;
 }
 
@@ -29,11 +34,14 @@ export const Keymap = ({
   scale,
   selectedLayerIndex,
   selectedKeyPosition,
+  platform = detectPlatform(),
   onKeyPositionClicked,
 }: KeymapProps) => {
   if (!keymap.layers[selectedLayerIndex]) {
     return <></>;
   }
+
+  const layers = keymap.layers.map(({ id, name }) => ({ id, name }));
 
   const positions = layout.keys.map((k, i) => {
     if (i >= keymap.layers[selectedLayerIndex].bindings.length) {
@@ -48,11 +56,20 @@ export const Keymap = ({
       };
     }
 
+    const binding = keymap.layers[selectedLayerIndex].bindings[i];
+    const behavior = behaviors[binding.behaviorId];
+    const displayName = behavior?.displayName || "Unknown";
+    const display = describeBinding(binding, behavior, layers, platform);
+
     return {
       id: `${keymap.layers[selectedLayerIndex].id}-${i}`,
-      header:
-        behaviors[keymap.layers[selectedLayerIndex].bindings[i].behaviorId]
-          ?.displayName || "Unknown",
+      // Behaviors drawn as a symbol or icon (e.g. Transparent, Bootloader)
+      // don't repeat their name in the corner.
+      header: display.showHeader
+        ? categoryAbbreviation(displayName, !!display.secondary)
+        : "",
+      headerIcon: display.showHeader ? behaviorIcon(displayName) : undefined,
+      headerTitle: displayName,
       x: k.x / 100.0,
       y: k.y / 100.0,
       width: k.width / 100,
@@ -61,9 +78,7 @@ export const Keymap = ({
       rx: (k.rx || 0) / 100.0,
       ry: (k.ry || 0) / 100.0,
       children: (
-        <HidUsageLabel
-          hid_usage={keymap.layers[selectedLayerIndex].bindings[i].param1}
-        />
+        <BindingLabel display={display} />
       ),
     };
   });

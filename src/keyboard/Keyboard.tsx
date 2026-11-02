@@ -31,6 +31,21 @@ import { LockStateContext } from "../rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
+import type { GetDeviceInfoResponse } from "@zmkfirmware/zmk-studio-ts-client/core";
+import {
+  ModifierPlatformSetting,
+  PLATFORM_NAMES,
+  PlatformOverrides,
+  detectPlatform,
+  deserializePlatformOverrides,
+  deviceKey,
+  resolvePlatform,
+} from "./platform";
+
+const platformOverridesStorage = {
+  deserialize: deserializePlatformOverrides,
+  serialize: (v: PlatformOverrides) => JSON.stringify(v),
+};
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -177,6 +192,18 @@ export default function Keyboard() {
   const [keymapScale, setKeymapScale] = useLocalStorageState<LayoutZoom>("keymapScale", "auto", {
     deserialize: deserializeLayoutZoom,
   });
+
+  const [deviceInfo] = useConnectedDeviceData<GetDeviceInfoResponse>(
+    { core: { getDeviceInfo: true } },
+    (resp) => resp?.core?.getDeviceInfo
+  );
+  const [platformOverrides, setPlatformOverrides] =
+    useLocalStorageState<PlatformOverrides>(
+      "modifierPlatformOverrides",
+      {},
+      platformOverridesStorage
+    );
+  const detectedPlatform = useMemo(() => detectPlatform(), []);
 
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number>(0);
   const [selectedKeyPosition, setSelectedKeyPosition] = useState<
@@ -500,6 +527,39 @@ export default function Keyboard() {
     }
   }, [keymap, selectedLayerIndex]);
 
+  const device = deviceKey(deviceInfo?.name, deviceInfo?.serialNumber);
+  const selectedLayer = keymap?.layers[selectedLayerIndex];
+  const layerPlatformSetting: ModifierPlatformSetting =
+    (device && selectedLayer
+      ? platformOverrides[device]?.[selectedLayer.id]
+      : undefined) ?? "auto";
+  const autoPlatform = resolvePlatform(
+    "auto",
+    selectedLayer?.name,
+    detectedPlatform
+  );
+  const layerPlatform = resolvePlatform(
+    layerPlatformSetting,
+    selectedLayer?.name,
+    detectedPlatform
+  );
+
+  const setLayerPlatform = (setting: ModifierPlatformSetting) => {
+    if (!device || !selectedLayer) {
+      return;
+    }
+    setPlatformOverrides(
+      produce((draft: PlatformOverrides) => {
+        const layers = (draft[device] ??= {});
+        if (setting === "auto") {
+          delete layers[selectedLayer.id];
+        } else {
+          layers[selectedLayer.id] = setting;
+        }
+      })
+    );
+  };
+
   return (
     <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_minmax(10em,auto)] bg-base-300 max-w-full min-w-0 min-h-0">
       <div className="p-2 flex flex-col gap-2 bg-base-200 row-span-2">
@@ -538,25 +598,45 @@ export default function Keyboard() {
             scale={keymapScale}
             selectedLayerIndex={selectedLayerIndex}
             selectedKeyPosition={selectedKeyPosition}
+            platform={layerPlatform}
             onKeyPositionClicked={setSelectedKeyPosition}
           />
-          <select
-            className="absolute top-2 right-2 h-8 rounded px-2"
-            value={keymapScale}
-            onChange={(e) => {
-              const value = deserializeLayoutZoom(e.target.value);
-              setKeymapScale(value);
-            }}
-          >
-            <option value="auto">Auto</option>
-            <option value={0.25}>25%</option>
-            <option value={0.5}>50%</option>
-            <option value={0.75}>75%</option>
-            <option value={1}>100%</option>
-            <option value={1.25}>125%</option>
-            <option value={1.5}>150%</option>
-            <option value={2}>200%</option>
-          </select>
+          <div className="absolute top-2 right-2 flex flex-col items-stretch gap-2">
+            <select
+              className="h-8 rounded px-2"
+              title="Modifier key labels for this layer (Mac, Windows or Linux). Auto uses Mac, Win or Linux in the layer name, otherwise this computer's OS."
+              aria-label="Modifier labels for this layer"
+              value={layerPlatformSetting}
+              disabled={!device}
+              onChange={(e) =>
+                setLayerPlatform(e.target.value as ModifierPlatformSetting)
+              }
+            >
+              <option value="auto">Auto ({PLATFORM_NAMES[autoPlatform]})</option>
+              <option value="mac">{PLATFORM_NAMES.mac}</option>
+              <option value="win">{PLATFORM_NAMES.win}</option>
+              <option value="linux">{PLATFORM_NAMES.linux}</option>
+            </select>
+            <select
+              className="h-8 rounded px-2"
+              title="Zoom"
+              aria-label="Zoom"
+              value={keymapScale}
+              onChange={(e) => {
+                const value = deserializeLayoutZoom(e.target.value);
+                setKeymapScale(value);
+              }}
+            >
+              <option value="auto">Auto</option>
+              <option value={0.25}>25%</option>
+              <option value={0.5}>50%</option>
+              <option value={0.75}>75%</option>
+              <option value={1}>100%</option>
+              <option value={1.25}>125%</option>
+              <option value={1.5}>150%</option>
+              <option value={2}>200%</option>
+            </select>
+          </div>
         </div>
       )}
       {keymap && selectedBinding && (
