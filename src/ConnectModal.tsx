@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
@@ -16,6 +16,16 @@ export type TransportFactory = {
   pick_and_connect?: {
     list: () => Promise<Array<AvailableDevice>>;
     connect: (dev: AvailableDevice) => Promise<RpcTransport>;
+  };
+  /**
+   * Devices that can be connected without a browser chooser, e.g. serial
+   * ports the user has already granted access to.
+   */
+  known?: {
+    list: () => Promise<Array<AvailableDevice>>;
+    connect: (dev: AvailableDevice) => Promise<RpcTransport>;
+    /** Call the callback when the list may have changed; returns cleanup. */
+    subscribe?: (onChange: () => void) => () => void;
   };
 };
 
@@ -104,6 +114,10 @@ function deviceList(
       </div>
       <ListBox
         aria-label="Device"
+        // Remount when a lone device appears so it starts focused, letting
+        // Enter connect to it.
+        key={devices.length === 1 ? "single" : "multiple"}
+        autoFocus={devices.length === 1 ? "first" : undefined}
         items={devices}
         onSelectionChange={onSelect}
         selectionMode="single"
@@ -112,7 +126,11 @@ function deviceList(
       >
         {([t, d]) => (
           <ListBoxItem
-            className="grid grid-cols-[1em_1fr] rounded hover:bg-base-300 cursor-pointer px-1"
+            className={({ isFocused }) =>
+              `grid grid-cols-[1em_1fr] rounded hover:bg-base-300 cursor-pointer px-1 ${
+                isFocused ? "bg-base-300" : ""
+              }`
+            }
             id={d.id}
             aria-label={d.label}
           >
@@ -127,9 +145,108 @@ function deviceList(
   );
 }
 
+interface KnownDeviceItemsProps {
+  open: boolean;
+  transports: TransportFactory[];
+  onTransportCreated: (t: RpcTransport) => void;
+}
+
+/**
+ * List items for devices that can be connected without the browser's
+ * chooser. When there is exactly one, it is preselected so Enter connects.
+ */
+const KnownDeviceItems = ({
+  open,
+  transports,
+  onTransportCreated,
+}: KnownDeviceItemsProps) => {
+  const [knownDevices, setKnownDevices] = useState<
+    Array<[TransportFactory, AvailableDevice]>
+  >([]);
+  const singleKnownRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let ignore = false;
+    const load = async () => {
+      const entries: Array<[TransportFactory, AvailableDevice]> = [];
+      for (const t of transports.filter((t) => t.known)) {
+        try {
+          const devices = await t.known!.list();
+          entries.push(
+            ...devices.map<[TransportFactory, AvailableDevice]>((d) => [t, d])
+          );
+        } catch (e) {
+          console.error("Failed to list known devices", e);
+        }
+      }
+      if (!ignore) {
+        setKnownDevices(entries);
+      }
+    };
+
+    load();
+    const unsubscribes = transports.map((t) => t.known?.subscribe?.(load));
+
+    return () => {
+      ignore = true;
+      unsubscribes.forEach((u) => u?.());
+    };
+  }, [transports, open]);
+
+  // Only preselect when exactly one device is available.
+  const singleKnown = knownDevices.length === 1;
+  useEffect(() => {
+    if (open && singleKnown) {
+      singleKnownRef.current?.focus();
+    }
+  }, [open, singleKnown]);
+
+  const connectKnown = async (t: TransportFactory, d: AvailableDevice) => {
+    try {
+      onTransportCreated(await t.known!.connect(d));
+    } catch (e) {
+      console.error(e);
+      if (e instanceof Error && !(e instanceof UserCancelledError)) {
+        alert(e.message);
+      }
+    }
+  };
+
+  if (knownDevices.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      {knownDevices.map(([t, d]) => (
+        <li key={`${t.label}-${d.id}`} className="list-none">
+          <button
+            ref={singleKnown ? singleKnownRef : undefined}
+            type="button"
+            className={`w-full flex justify-between gap-4 rounded px-2 py-1 text-left ${
+              singleKnown
+                ? "bg-primary text-primary-content"
+                : "bg-base-300 hover:bg-primary hover:text-primary-content"
+            }`}
+            onClick={() => connectKnown(t, d)}
+          >
+            <span>{d.label}</span>
+            <span className="opacity-70">{t.label}</span>
+          </button>
+        </li>
+      ))}
+    </>
+  );
+};
+
 function simpleDevicePicker(
   transports: TransportFactory[],
-  onTransportCreated: (t: RpcTransport) => void
+  onTransportCreated: (t: RpcTransport) => void,
+  open: boolean
 ) {
   const [availableDevices, setAvailableDevices] = useState<
     AvailableDevice[] | undefined
@@ -186,21 +303,30 @@ function simpleDevicePicker(
     };
   }, [selectedTransport]);
 
+  // Connecting a device the browser hasn't granted access to yet opens the
+  // browser's own chooser.
   let connections = transports.map((t) => (
     <li key={t.label} className="list-none">
       <button
-        className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1"
+        className="w-full flex justify-between gap-4 rounded px-2 py-1 text-left hover:bg-base-300"
         type="button"
         onClick={async () => setSelectedTransport(t)}
       >
-        {t.label}
+        <span>Add a {t.label} device…</span>
       </button>
     </li>
   ));
   return (
     <div>
-      <p className="text-sm">Select a connection type.</p>
-      <ul className="flex gap-2 pt-2">{connections}</ul>
+      <p className="text-sm">Select a device.</p>
+      <ul className="flex flex-col gap-1 pt-2">
+        <KnownDeviceItems
+          open={open}
+          transports={transports}
+          onTransportCreated={onTransportCreated}
+        />
+        {connections}
+      </ul>
       {selectedTransport && availableDevices && (
         <ul>
           {availableDevices.map((d) => (
@@ -269,7 +395,7 @@ function connectOptions(
   );
 
   return useSimplePicker
-    ? simpleDevicePicker(transports, onTransportCreated)
+    ? simpleDevicePicker(transports, onTransportCreated, open || false)
     : deviceList(open || false, transports, onTransportCreated);
 }
 
