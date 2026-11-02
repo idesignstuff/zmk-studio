@@ -19,6 +19,12 @@ import {
   connect as tauri_serial_connect,
   list_devices as serial_list_devices,
 } from "./tauri/serial";
+import {
+  connectKnownSerialDevice,
+  listKnownSerialDevices,
+  rememberDeviceName,
+  subscribeToSerialDeviceChanges,
+} from "./rpc/known-serial-devices";
 import Keyboard from "./keyboard/Keyboard";
 import { UndoRedoContext, useUndoRedo } from "./undoRedo";
 import { usePub, useSub } from "./usePubSub";
@@ -37,7 +43,15 @@ declare global {
 }
 
 const TRANSPORTS: TransportFactory[] = [
-  navigator.serial && { label: "USB", connect: serial_connect },
+  navigator.serial && {
+    label: "USB",
+    connect: serial_connect,
+    known: {
+      list: listKnownSerialDevices,
+      connect: connectKnownSerialDevice,
+      subscribe: subscribeToSerialDeviceChanges,
+    },
+  },
   ...(navigator.bluetooth && navigator.userAgent.indexOf("Linux") >= 0
     ? [{ label: "BLE", connect: gatt_connect }]
     : []),
@@ -156,6 +170,7 @@ async function connect(
       setConn({ conn: null });
     });
 
+  rememberDeviceName(transport.label, details.name);
   setConnectedDeviceName(details.name);
   setConn({ conn });
 }
